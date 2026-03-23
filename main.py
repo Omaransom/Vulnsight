@@ -1,16 +1,17 @@
 import warnings
 
 from src.api.client import DashboardReporter
+from src.core.settings import settings
 from src.detection.collector import TrafficCollector
 from src.detection.engine import InferenceEngine
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-def start_vulnsight(api_base_url="http://127.0.0.1:8000"):
+def start_vulnsight(api_base_url=settings.api_base_url):
     # 1. Initialize core services
     engine = InferenceEngine(
-        model_path="models/vulnsight_cnn_bilstm.pth",
-        scaler_path="models/scaler.pkl",
+        model_path="model/vulnsight_cnn_bilstm.pth",
+        scaler_path="model/scaler.pkl",
         use_shap=True,
     )
     collector = TrafficCollector()

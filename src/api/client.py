@@ -2,10 +2,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import requests
+from src.core.settings import settings
 
 
 class DashboardReporter:
-    def __init__(self, base_url: str = "http://127.0.0.1:8000", timeout: int = 3):
+    def __init__(self, base_url: str = settings.api_base_url, timeout: int = 3):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
