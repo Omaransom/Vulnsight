@@ -1,15 +1,26 @@
 from collections import Counter
 from datetime import datetime, timezone
 from typing import List
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from src.api.auth.dependencies import require_roles, set_auth_repository as set_auth_dep_repository
+from src.api.auth.routes import router as auth_router
+from src.api.auth.routes import set_auth_repository as set_auth_routes_repository
 from src.api.schemas import AlertPayload, ReportPayload
 from src.core.settings import settings
+from src.db.auth_repository import AuthRepository
 from src.db.repository import AlertRepository
 
 app = FastAPI(title="VulnSight Reporting API", version="1.0.0")
 repository = AlertRepository(db_path=settings.database_path)
+auth_repository = AuthRepository(db_path=settings.database_path)
+auth_repository.ensure_default_user(
+    username=settings.auth_bootstrap_admin_username,
+    password=settings.auth_bootstrap_admin_password,
+    role="admin",
+)
+set_auth_dep_repository(auth_repository)
+set_auth_routes_repository(auth_repository)
+app.include_router(auth_router)
 
 
 class ConnectionManager:
@@ -52,7 +63,10 @@ def health():
 
 
 @app.post("/api/v1/alerts")
-async def ingest_alert(alert: AlertPayload):
+async def ingest_alert(
+    alert: AlertPayload,
+    _=Depends(require_roles("admin", "sensor")),
+):
     repository.save_alert(alert)
     payload = alert.model_dump() if hasattr(alert, "model_dump") else alert.dict()
     await ws_manager.broadcast_json(payload)
@@ -60,14 +74,17 @@ async def ingest_alert(alert: AlertPayload):
 
 
 @app.get("/api/v1/alerts", response_model=List[AlertPayload])
-def get_alerts(limit: int = 100):
+def get_alerts(
+    limit: int = 100,
+    _=Depends(require_roles("admin", "analyst", "viewer")),
+):
     if limit <= 0:
         return []
     return repository.get_recent_alerts(limit=limit)
 
 
 @app.post("/api/v1/reports/generate", response_model=ReportPayload)
-def generate_report():
+def generate_report(_=Depends(require_roles("admin", "analyst"))):
     alerts = repository.get_recent_alerts(limit=5000)
     total = len(alerts)
     malicious = sum(1 for a in alerts if a.is_malicious)
