@@ -1,0 +1,8 @@
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+
+# Local datasets and generated artifacts
+dataset/
+*.db
