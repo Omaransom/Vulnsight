@@ -108,12 +108,12 @@ def generate_report(_=Depends(require_roles("admin", "analyst"))):
     )
 
 
-@app.post("/api/v1/admin/import-network-sessions")
-def import_network_sessions(
+@app.post("/api/v1/admin/import-flows")
+def import_flows(
     limit: int = 1000,
     _=Depends(require_roles("admin", "analyst")),
 ):
-    imported = repository.import_network_sessions_as_alerts(limit=limit)
+    imported = repository.import_flows_as_alerts(limit=limit)
     return {"imported": imported, "counts": repository.db_counts()}
 
 

@@ -69,22 +69,22 @@ class AlertRepository:
         payloads.reverse()
         return [AlertPayload(**payload) for payload in payloads]
 
-    def import_network_sessions_as_alerts(self, limit: int = 1000) -> int:
+    def import_flows_as_alerts(self, limit: int = 1000) -> int:
         """
-        Import teammate DB sessions (network_session) into canonical alerts table.
+        Import flow rows into canonical alerts table.
         Safe to run repeatedly; already imported sessions are skipped.
         """
         query_limit = max(1, min(limit, 10_000))
         imported = 0
         with self._lock:
             with self._connect() as conn:
-                if not table_exists(conn, "network_session"):
+                if not table_exists(conn, "flow"):
                     return 0
                 rows = conn.execute(
                     """
                     SELECT ns.id, ns.start_time, ns.src_ip, ns.dst_ip, ns.protocol,
                            ns.packet_per_sec, ns.bytes_per_sec, ns.total_packets, ns.total_bytes
-                    FROM network_session ns
+                    FROM flow ns
                     LEFT JOIN imported_sessions imp ON imp.session_id = ns.id
                     WHERE imp.session_id IS NULL
                     ORDER BY ns.start_time DESC
@@ -106,14 +106,14 @@ class AlertRepository:
                         "source_ip": row["src_ip"] or "0.0.0.0",
                         "destination_ip": row["dst_ip"] or "0.0.0.0",
                         "protocol": None,
-                        "interface": "network_session_import",
+                        "interface": "flow_import",
                         "prediction": 1 if is_malicious else 0,
                         "label": "ATTACK DETECTED" if is_malicious else "NORMAL",
                         "confidence": float(confidence),
                         "confidence_level": "high" if confidence >= 0.8 else "medium",
                         "severity": severity,
                         "triage_action": (
-                            "investigate_session_now"
+                            "investigate_flow_now"
                             if is_malicious
                             else "monitor_traffic_pattern"
                         ),
@@ -154,11 +154,11 @@ class AlertRepository:
         with self._connect() as conn:
             counts = {
                 "alerts": conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0],
-                "network_session": 0,
+                "flow": 0,
                 "packet": 0,
                 "pcap_file": 0,
             }
-            for table in ("network_session", "packet", "pcap_file"):
+            for table in ("flow", "packet", "pcap_file"):
                 if table_exists(conn, table):
                     counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         return counts
