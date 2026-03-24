@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+from src.db.schema import ensure_schema
+
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
     salt = salt or os.urandom(16)
@@ -39,38 +41,7 @@ class AuthRepository:
 
     def _init_db(self):
         with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT NOT NULL UNIQUE,
-                    password_hash TEXT NOT NULL,
-                    is_active INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS roles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS user_roles (
-                    user_id INTEGER NOT NULL,
-                    role_id INTEGER NOT NULL,
-                    PRIMARY KEY (user_id, role_id),
-                    FOREIGN KEY (user_id) REFERENCES users(id),
-                    FOREIGN KEY (role_id) REFERENCES roles(id)
-                )
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_roles_name ON roles(name)")
+            ensure_schema(conn)
             conn.commit()
 
     def ensure_default_user(self, username: str, password: str, role: str):
