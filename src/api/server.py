@@ -55,10 +55,12 @@ ws_manager = ConnectionManager()
 
 @app.get("/api/v1/health")
 def health():
+    counts = repository.db_counts()
     return {
         "status": "ok",
         "timestamp": datetime.now(timezone.utc),
         "database_path": settings.database_path,
+        "counts": counts,
     }
 
 
@@ -104,6 +106,15 @@ def generate_report(_=Depends(require_roles("admin", "analyst"))):
         severity_breakdown=dict(severity_counter),
         top_targets=top_targets,
     )
+
+
+@app.post("/api/v1/admin/import-network-sessions")
+def import_network_sessions(
+    limit: int = 1000,
+    _=Depends(require_roles("admin", "analyst")),
+):
+    imported = repository.import_network_sessions_as_alerts(limit=limit)
+    return {"imported": imported, "counts": repository.db_counts()}
 
 
 @app.websocket("/api/v1/ws/alerts")
