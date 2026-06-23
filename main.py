@@ -56,6 +56,7 @@ def log(tag: str, color: str, msg: str):
 def run_api():
     from src.core.settings import settings
     from src.api.server import app
+    from fastapi import HTTPException
     from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
 
@@ -67,6 +68,9 @@ def run_api():
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def _spa(full_path: str):
+            # Unknown /api/ paths must 404, not fall through to index.html.
+            if full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not Found")
             candidate = dist / full_path
             if candidate.is_file():
                 return FileResponse(str(candidate))

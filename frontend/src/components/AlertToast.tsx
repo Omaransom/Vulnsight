@@ -18,7 +18,7 @@ interface Toast {
   alert: Alert;
 }
 
-const DEFAULT_NOTIFY_SEVERITIES = ['critical', 'high'];
+const DEFAULT_NOTIFY_SEVERITIES = ['critical', 'high', 'medium'];
 const AUTO_DISMISS_MS = 6000;
 
 const SEV_STYLE: Record<string, string> = {

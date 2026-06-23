@@ -32,7 +32,11 @@ export default function App() {
                 <Route path="live" element={<LiveTrafficPage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="model" element={<ModelPage />} />
-                <Route path="settings" element={<AdminPage />} />
+                {/* Settings/admin is restricted — a client navigating here by
+                    URL is redirected home (backend also enforces the roles). */}
+                <Route element={<ProtectedRoute roles={['admin', 'analyst']} />}>
+                  <Route path="settings" element={<AdminPage />} />
+                </Route>
               </Route>
             </Route>
 

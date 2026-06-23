@@ -7,6 +7,9 @@ __pycache__/
 dataset/raw/
 dataset/processed/
 *.db
+# SQLite transient WAL / shared-memory files
+*.db-wal
+*.db-shm
 
 # Runtime upload directory
 database/pcap_uploads/

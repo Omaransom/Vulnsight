@@ -9,6 +9,7 @@ export interface Alert {
   source_ip: string;
   destination_ip: string;
   protocol: number | null;
+  dst_port?: number | null;
   interface: string | null;
   prediction: number;
   label: string;

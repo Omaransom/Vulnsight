@@ -4,7 +4,6 @@ import {
   Database,
   FlaskConical,
   Layers,
-  Settings as SettingsIcon,
   ShieldCheck,
   TrendingUp,
 } from 'lucide-react';
@@ -60,22 +59,24 @@ const FEATURES = [
 ];
 
 const METRICS = [
-  { label: 'Accuracy',  value: '99.85%', color: 'text-emerald-400', barColor: 'bg-emerald-400', bar: 99.85 },
-  { label: 'Precision', value: '99.60%', color: 'text-cyan-400',    barColor: 'bg-cyan-400',    bar: 99.60 },
-  { label: 'Recall',    value: '99.61%', color: 'text-violet-400',  barColor: 'bg-violet-400',  bar: 99.61 },
-  { label: 'F1-Score',  value: '99.61%', color: 'text-amber-400',   barColor: 'bg-amber-400',   bar: 99.61 },
+  { label: 'Accuracy',  value: '99.88%', color: 'text-emerald-400', barColor: 'bg-emerald-400', bar: 99.88 },
+  { label: 'Precision', value: '99.67%', color: 'text-cyan-400',    barColor: 'bg-cyan-400',    bar: 99.67 },
+  { label: 'Recall',    value: '99.70%', color: 'text-violet-400',  barColor: 'bg-violet-400',  bar: 99.70 },
+  { label: 'F1-Score',  value: '99.69%', color: 'text-amber-400',   barColor: 'bg-amber-400',   bar: 99.69 },
 ];
 
-// Confusion matrix from the latest training run (held-out test set, 424,601 samples)
+// Confusion matrix from the offline benchmark over the full CIC-IDS 2017
+// dataset (2,830,671 flow windows), evaluated with the deployed model,
+// preprocessing pipeline, and tuned threshold.
 const CM = {
-  TP:  83_323,   // Malicious → correctly predicted Malicious
-  TN: 340_621,   // Benign    → correctly predicted Benign
-  FP:     333,   // Benign    → incorrectly predicted Malicious
-  FN:     324,   // Malicious → incorrectly predicted Benign
+  TP:   555_962,   // Malicious → correctly predicted Malicious
+  TN: 2_271_199,   // Benign    → correctly predicted Benign
+  FP:     1_826,   // Benign    → incorrectly predicted Malicious
+  FN:     1_684,   // Malicious → incorrectly predicted Benign
 };
-const FPR = ((CM.FP / (CM.FP + CM.TN)) * 100).toFixed(3); // 0.098%
+const FPR = ((CM.FP / (CM.FP + CM.TN)) * 100).toFixed(3); // 0.080%
 
-const TEST_SIZE = CM.TP + CM.TN + CM.FP + CM.FN; // 424,601
+const TEST_SIZE = CM.TP + CM.TN + CM.FP + CM.FN; // 2,830,671
 
 // Tuned decision threshold (from model/threshold.json — maximises F1 on validation set)
 const THRESHOLD = 0.76;
@@ -188,7 +189,7 @@ export function ModelPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">AI Detection Model</h1>
         <p className="mt-1 text-sm text-slate-400">
-          CNN-BiLSTM hybrid · trained on CIC-IDS 2017 · 99.85% accuracy · 0.098% false positive rate
+          CNN-BiLSTM hybrid · trained on CIC-IDS 2017 · 99.88% accuracy · 0.080% false positive rate
         </p>
       </div>
 
@@ -198,7 +199,7 @@ export function ModelPage() {
           { label: 'Architecture',     value: 'CNN-BiLSTM',             icon: Brain,       color: 'text-cyan-400'    },
           { label: 'Input Features',   value: '34',                      icon: Layers,      color: 'text-violet-400'  },
           { label: 'Training Windows', value: '~2.83M',                  icon: Database,    color: 'text-amber-400'   },
-          { label: 'Test Accuracy',    value: '99.85%',                  icon: ShieldCheck, color: 'text-emerald-400' },
+          { label: 'Accuracy',         value: '99.88%',                  icon: ShieldCheck, color: 'text-emerald-400' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
             <Icon className={`h-5 w-5 ${color} mb-2`} />
@@ -213,7 +214,7 @@ export function ModelPage() {
         <SectionHeader
           icon={TrendingUp}
           title="Performance Metrics"
-          subtitle={`Evaluated on held-out test set · ${fmt(TEST_SIZE)} windows · decision threshold ${THRESHOLD}`}
+          subtitle={`Evaluated on the full CIC-IDS 2017 dataset · ${fmt(TEST_SIZE)} windows · decision threshold ${THRESHOLD}`}
         />
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
@@ -352,38 +353,6 @@ export function ModelPage() {
               </p>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Training Configuration */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
-        <SectionHeader
-          icon={SettingsIcon}
-          title="Training Configuration"
-          subtitle="Hyperparameters and procedures used during training"
-        />
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
-          {[
-            { k: 'Optimizer',         v: 'AdamW' },
-            { k: 'Initial LR',        v: '1 × 10⁻³' },
-            { k: 'Weight decay',      v: '1 × 10⁻⁴' },
-            { k: 'LR scheduler',      v: 'Cosine + 3-epoch warmup' },
-            { k: 'Batch size',        v: '512' },
-            { k: 'Loss',              v: 'Focal Loss (γ=2.0) + label smoothing (0.05)' },
-            { k: 'Class weights',     v: 'Balanced (benign 0.62, attack 2.54)' },
-            { k: 'Gradient clipping', v: 'Norm = 1.0' },
-            { k: 'LSTM init',         v: 'Xavier + Orthogonal + forget bias 1' },
-            { k: 'Mixed precision',   v: 'AMP (float16)' },
-            { k: 'SWA',               v: 'Stochastic Weight Averaging enabled' },
-            { k: 'Early stopping',    v: 'Patience 12' },
-            { k: 'Epochs trained',    v: '26 (early stopped)' },
-            { k: 'Decision threshold',v: `${THRESHOLD} (tuned by F1 on validation)` },
-          ].map(({ k, v }) => (
-            <div key={k} className="rounded-lg border border-slate-800 bg-slate-800/30 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wide text-slate-500">{k}</p>
-              <p className="text-sm font-semibold text-slate-200 mt-0.5">{v}</p>
-            </div>
-          ))}
         </div>
       </div>
 

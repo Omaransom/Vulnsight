@@ -1,27 +1,9 @@
-import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
 from src.core.settings import settings
-
-
-def _load_threshold() -> float:
-    """Load the trained decision threshold from model/threshold.json (fallback 0.5)."""
-    try:
-        path = Path(__file__).resolve().parents[2] / "model" / "threshold.json"
-        with open(path) as f:
-            t = float(json.load(f)["threshold"])
-        if 0.0 < t < 1.0:
-            return t
-    except Exception:
-        pass
-    return 0.5
-
-
-# Tuned threshold loaded once at module import — same value the engine uses
-TRAINED_THRESHOLD = _load_threshold()
+from src.core.severity import classify_alert
 
 
 class DashboardReporter:
@@ -54,82 +36,16 @@ class DashboardReporter:
             return {}
         return {"Authorization": f"Bearer {self._token}"}
 
-    @staticmethod
-    def _classify_confidence(prediction: int, confidence: float) -> Dict[str, str]:
-        """
-        Turn (prediction, confidence) into UI-friendly fields.
-
-        For malicious predictions we bucket relative to the trained threshold:
-          - very_high  : confidence ≥ 0.95            → near-perfect certainty
-          - high       : confidence ≥ midpoint(t, 1)  → solidly above threshold
-          - medium     : confidence ≥ threshold       → just past threshold (borderline)
-
-        Anything below threshold is, by definition, not classified as malicious,
-        so the "low malicious" branch is never taken in practice — kept only as
-        a defensive fallback.
-        """
-        t = TRAINED_THRESHOLD
-        midpoint = (t + 1.0) / 2.0    # e.g. for t=0.78 → 0.89
-
-        if prediction == 1:
-            if confidence >= 0.95:
-                return {
-                    "confidence_level": "very_high",
-                    "severity": "critical",
-                    "triage_action": "isolate_host_immediately",
-                }
-            if confidence >= midpoint:
-                return {
-                    "confidence_level": "high",
-                    "severity": "high",
-                    "triage_action": "investigate_now",
-                }
-            if confidence >= t:
-                return {
-                    "confidence_level": "medium",
-                    "severity": "medium",
-                    "triage_action": "review_packet_context",
-                }
-            return {
-                "confidence_level": "low",
-                "severity": "low",
-                "triage_action": "monitor_and_revalidate",
-            }
-
-        # benign branch: confidence here = benign probability
-        if confidence >= 0.95:
-            return {
-                "confidence_level": "very_high",
-                "severity": "info",
-                "triage_action": "no_action_needed",
-            }
-        if confidence >= 0.85:
-            return {
-                "confidence_level": "high",
-                "severity": "info",
-                "triage_action": "no_action_needed",
-            }
-        if confidence >= 0.70:
-            return {
-                "confidence_level": "medium",
-                "severity": "info",
-                "triage_action": "observe_traffic_pattern",
-            }
-        return {
-            "confidence_level": "low",
-            "severity": "warning",
-            "triage_action": "mark_as_uncertain_benign",
-        }
-
     def post_alert(
         self,
         metadata: Dict[str, Any],
         prediction: int,
         confidence: float,
         shap_top_features: List[Dict[str, Any]],
+        attack_type: str | None = None,
     ) -> bool:
         is_malicious = prediction == 1
-        classification = self._classify_confidence(prediction=prediction, confidence=confidence)
+        classification = classify_alert(prediction, confidence, attack_type)
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source_ip": metadata.get("src_ip", ""),
@@ -143,6 +59,7 @@ class DashboardReporter:
             "severity": classification["severity"],
             "triage_action": classification["triage_action"],
             "is_malicious": is_malicious,
+            "attack_type": attack_type,
             "shap_top_features": shap_top_features,
         }
 

@@ -12,21 +12,6 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
-def _classify(prediction: int, confidence: float) -> Dict[str, str]:
-    if prediction == 1:
-        if confidence >= 0.90:
-            level, severity, action = "very_high", "critical", "isolate_host_immediately"
-        elif confidence >= 0.75:
-            level, severity, action = "high", "high", "block_and_investigate"
-        elif confidence >= 0.60:
-            level, severity, action = "medium", "medium", "monitor_closely"
-        else:
-            level, severity, action = "low", "low", "log_and_review"
-    else:
-        level, severity, action = "very_high", "info", "no_action_required"
-    return {"confidence_level": level, "severity": severity, "triage_action": action}
-
-
 @dataclass
 class DetectionStatus:
     running: bool = False
@@ -118,6 +103,7 @@ class DetectionManager:
             from src.detection.engine import InferenceEngine
             from src.detection.classifier import classify_attack_type
             from src.detection.signatures import SignatureEngine
+            from src.core.severity import classify_alert
         except Exception as exc:
             self._set_error(f"Import failed: {exc}")
             return
@@ -202,7 +188,7 @@ class DetectionManager:
                     detection_source = "model"
                     detection_reason = None
 
-                meta = _classify(prediction, confidence)
+                meta = classify_alert(prediction, confidence, attack_type)
                 now = datetime.now(timezone.utc)
 
                 from src.api.schemas import AlertPayload, ShapInsight

@@ -27,6 +27,7 @@ import requests
 
 try:
     from src.core.feature_config import FEATURE_NAMES
+    from src.core.severity import classify_alert
     from src.detection.engine import InferenceEngine
     from src.detection.classifier import infer_attack_type_from_label
 except ModuleNotFoundError as e:
@@ -105,16 +106,6 @@ ORG_SCENARIO_PHASES = [
     },
 ]
 
-SEVERITY_MAP = {
-    "ddos":              "critical",
-    "port_scan":         "medium",
-    "brute_force":       "medium",
-    "data_exfiltration": "high",
-    "c2_beacon":         "high",
-    "intrusion":         "high",
-    "normal":            "info",
-}
-
 LABEL_DISPLAY = {
     "ddos":              "DDoS DETECTED",
     "port_scan":         "PORT SCAN DETECTED",
@@ -128,6 +119,21 @@ LABEL_DISPLAY = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def require_server(url: str) -> None:
+    """Fail fast with a clear message if Vulnsight isn't running, instead of
+    dumping a raw connection stack trace."""
+    try:
+        requests.get(f"{url}/api/v1/health", timeout=3)
+    except requests.exceptions.RequestException:
+        sys.exit(
+            "\n[!] Cannot reach VulnSight at " + url + "\n"
+            "    The API server is not running.  Start it FIRST in a separate\n"
+            "    terminal, then re-run this script:\n\n"
+            "        python main.py\n\n"
+            "    Wait until it prints that it is serving on port 8000, then retry.\n"
+        )
+
 
 def login(url: str, username: str, password: str) -> str:
     resp = requests.post(
@@ -151,18 +157,10 @@ def build_alert(
     dst_port: int,
     shap_features: list,
 ) -> dict:
-    severity = SEVERITY_MAP.get(attack_type, "medium")
-    label    = LABEL_DISPLAY.get(attack_type, "INTRUSION DETECTED")
-    if is_malicious:
-        if confidence >= 0.95:
-            conf_level = "very_high"
-        elif confidence >= 0.89:
-            conf_level = "high"
-        else:
-            conf_level = "medium"
-    else:
-        conf_level = "high" if confidence >= 0.85 else "medium" if confidence >= 0.70 else "low"
-    triage = "block_and_investigate" if is_malicious else "allow"
+    label = LABEL_DISPLAY.get(attack_type, "INTRUSION DETECTED")
+    # Use the same classifier the live engine and PCAP path use, so simulated
+    # alerts get identical severity / confidence_level / triage fields.
+    cls = classify_alert(1 if is_malicious else 0, confidence, attack_type)
 
     return {
         "timestamp":         datetime.now(timezone.utc).isoformat(),
@@ -175,9 +173,9 @@ def build_alert(
         "label":             label,
         "attack_type":       attack_type,
         "confidence":        round(confidence, 4),
-        "confidence_level":  conf_level,
-        "severity":          severity,
-        "triage_action":     triage,
+        "confidence_level":  cls["confidence_level"],
+        "severity":          cls["severity"],
+        "triage_action":     cls["triage_action"],
         "is_malicious":      is_malicious,
         "shap_top_features": shap_features or [
             {"feature": FEATURE_NAMES[10], "impact": round(random.uniform(0.2, 0.7), 3), "direction": "positive"},
@@ -232,7 +230,7 @@ def run_phase(phase: dict, engine: InferenceEngine, headers: dict, url: str,
         print(f"    [!] No rows after filter — skipping")
         return
 
-    df = df.sample(n=min(phase["rows"], len(df)), random_state=42).reset_index(drop=True)
+    df = df.head(phase["rows"]).reset_index(drop=True)  # sequential, not shuffled
     engine.flow_buffer.clear()
     delay = 1.0 / rate if rate > 0 else 0.0
 
@@ -330,6 +328,7 @@ def main():
 
     # ── scenario shortcut ─────────────────────────────────────────────────
     if args.scenario == "org":
+        require_server(args.url)
         try:
             token = login(args.url, args.username, args.password)
         except Exception as e:
@@ -363,6 +362,7 @@ def main():
     print(f"  Target      : {args.url}")
     print(f"{'='*55}\n")
 
+    require_server(args.url)
     try:
         token = login(args.url, args.username, args.password)
     except Exception as e:
@@ -394,14 +394,32 @@ def main():
             continue
 
         if args.malicious_only:
+            # NOTE: stripping benign rows removes the surrounding context the
+            # model relies on for sparse attack types (web attacks, bot,
+            # infiltration are <2% of their files, so the model only ever saw
+            # them embedded in benign traffic). For those, --malicious-only
+            # produces out-of-distribution all-attack windows that under-
+            # detect. It is safe for dense attacks (DDoS/PortScan/DoS Hulk).
             df = df[df[label_col].str.upper() != "BENIGN"]
+            if len(df) == 0:
+                print(f"    [!] No rows after filter -- skipping")
+                continue
+            df = df.head(args.rows).reset_index(drop=True)
+        else:
+            # Realistic mode: seek to the region that contains the attacks and
+            # keep the benign context around them (matches Layer 1 and live
+            # traffic). Find the first attack row, back up ~50 rows, then take
+            # `rows` consecutive flows so the model sees attacks in context.
+            is_mal = df[label_col].str.upper() != "BENIGN"
+            if is_mal.any():
+                first = is_mal.values.argmax()           # index of first attack
+                start = max(0, first - 50)
+                df = df.iloc[start:start + args.rows].reset_index(drop=True)
+            else:
+                df = df.head(args.rows).reset_index(drop=True)
 
-        if len(df) == 0:
-            print(f"    [!] No rows after filter -- skipping")
-            continue
-
-        df = df.sample(n=min(args.rows, len(df)), random_state=42).reset_index(drop=True)
-        print(f"    Rows to process: {len(df):,}")
+        print(f"    Rows to process: {len(df):,}  "
+              f"(attacks: {(df[label_col].str.upper() != 'BENIGN').sum():,})")
 
         engine.flow_buffer.clear()
         file_stats = {"sent": 0, "malicious": 0, "benign": 0, "skipped": 0, "errors": 0}

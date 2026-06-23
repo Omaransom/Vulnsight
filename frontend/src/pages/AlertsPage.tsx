@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { getAlerts } from '../api/client';
 import { AlertTable } from '../components/AlertTable';
 import { useLiveAlerts } from '../components/Layout';
+import { mergeAlerts } from '../utils/alerts';
 
 export function AlertsPage() {
   const { liveAlerts, connected, clear } = useLiveAlerts();
@@ -15,7 +16,7 @@ export function AlertsPage() {
     refetchInterval: 30_000,
   });
 
-  const allAlerts = showLive ? [...liveAlerts, ...historical].slice(0, 500) : historical;
+  const allAlerts = showLive ? mergeAlerts(liveAlerts, historical, 500) : historical;
   const alerts = allAlerts.filter((a) => a.is_malicious);
 
   return (

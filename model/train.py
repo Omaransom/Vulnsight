@@ -74,10 +74,12 @@ from src.core.feature_config import FEATURE_NAMES
 from src.core.model_arch import HybridCNNBiLSTM
 
 
-DATA_DIR    = Path(r"C:\AAST\Vulnsight\dataset\processed")
-MODEL_PATH  = Path("model/vulnsight_cnn_bilstm.pth")
-SCALER_PATH = Path("model/scaler.pkl")
-CONFIG_PATH = Path("model/threshold.json")
+# Resolve all paths from the project root so training works regardless of the
+# machine or current working directory (no hardcoded absolute paths).
+DATA_DIR    = _PROJECT_ROOT / "dataset" / "processed"
+MODEL_PATH  = _PROJECT_ROOT / "model" / "vulnsight_cnn_bilstm.pth"
+SCALER_PATH = _PROJECT_ROOT / "model" / "scaler.pkl"
+CONFIG_PATH = _PROJECT_ROOT / "model" / "threshold.json"
 WINDOW      = 10
 GRAD_CLIP   = 1.0
 WEIGHT_DECAY = 1e-4

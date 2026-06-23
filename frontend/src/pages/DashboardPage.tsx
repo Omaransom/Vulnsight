@@ -28,6 +28,7 @@ import { getAlerts, getHealth, getSeverityBreakdown, getTimeline, getTopAttacker
 import { AlertTable } from '../components/AlertTable';
 import { StatCard } from '../components/StatCard';
 import { useLiveAlerts } from '../components/Layout';
+import { mergeAlerts } from '../utils/alerts';
 
 const SEV_COLORS: Record<string, string> = {
   critical: '#ef4444',
@@ -90,9 +91,11 @@ export function DashboardPage() {
     refetchSeverity();
   };
 
-  // Merge live + historical for table and derived stats
+  // Merge live + historical for table and derived stats. Dedup is essential:
+  // a live alert is also returned by the next history fetch, so without it
+  // every derived count would be inflated during the overlap window.
   const allAlerts = useMemo(
-    () => [...liveAlerts, ...alerts].slice(0, 200),
+    () => mergeAlerts(liveAlerts, alerts, 200),
     [liveAlerts, alerts],
   );
 

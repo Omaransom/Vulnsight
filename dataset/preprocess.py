@@ -30,7 +30,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+# This script lives in dataset/, so the project root is one level up.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.feature_config import FEATURE_NAMES

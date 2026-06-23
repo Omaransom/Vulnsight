@@ -89,7 +89,7 @@ export function LiveTrafficPage() {
           <div className="divide-y divide-slate-800/60 overflow-hidden">
             {[...visible].reverse().map((alert, i) => (
               <div
-                key={i}
+                key={`${alert.timestamp}|${alert.source_ip}|${alert.destination_ip}|${i}`}
                 onClick={() => setSelected(alert)}
                 className={`flex cursor-pointer items-center gap-4 px-5 py-3 text-xs transition hover:bg-slate-800/40 ${
                   i === 0 ? 'bg-slate-800/20' : ''

@@ -42,35 +42,37 @@ AUTH_PORTS = {21, 22, 23, 25, 110, 143, 389, 445, 1433, 3306, 3389, 5432, 5900}
 # explanation drawer renders the same way for signature hits.  The "impact"
 # values are illustrative weights, not learned attributions; they tell the
 # analyst WHICH features the rule fired on, in priority order.
+# Evidence features reference only the 34 tool-agnostic features that
+# actually exist in feature_config.FEATURE_NAMES (no rate/IAT/duration).
 _RULE_EVIDENCE: Dict[str, list] = {
     "port_scan": [
         {"feature": "Destination Port",            "impact": 0.40, "direction": "increases_risk"},
-        {"feature": "Total Fwd Packets",           "impact": 0.25, "direction": "increases_risk"},
-        {"feature": "Flow Duration",               "impact": 0.20, "direction": "decreases_risk"},
+        {"feature": "SYN Flag Count",              "impact": 0.25, "direction": "increases_risk"},
+        {"feature": "Total Fwd Packets",           "impact": 0.20, "direction": "decreases_risk"},
         {"feature": "Packet Length Std",           "impact": 0.15, "direction": "decreases_risk"},
     ],
     "ddos": [
-        {"feature": "Flow Packets/s",              "impact": 0.45, "direction": "increases_risk"},
-        {"feature": "Flow Bytes/s",                "impact": 0.30, "direction": "increases_risk"},
-        {"feature": "Total Fwd Packets",           "impact": 0.15, "direction": "increases_risk"},
-        {"feature": "Flow IAT Mean",               "impact": 0.10, "direction": "decreases_risk"},
+        {"feature": "SYN Flag Count",              "impact": 0.40, "direction": "increases_risk"},
+        {"feature": "Total Fwd Packets",           "impact": 0.30, "direction": "increases_risk"},
+        {"feature": "Total Backward Packets",      "impact": 0.15, "direction": "increases_risk"},
+        {"feature": "Average Packet Size",         "impact": 0.15, "direction": "decreases_risk"},
     ],
     "brute_force": [
-        {"feature": "Destination Port",            "impact": 0.45, "direction": "increases_risk"},
+        {"feature": "Destination Port",            "impact": 0.40, "direction": "increases_risk"},
         {"feature": "Total Fwd Packets",           "impact": 0.25, "direction": "increases_risk"},
-        {"feature": "Fwd Packets/s",               "impact": 0.20, "direction": "increases_risk"},
-        {"feature": "Packet Length Std",           "impact": 0.10, "direction": "decreases_risk"},
+        {"feature": "PSH Flag Count",              "impact": 0.20, "direction": "increases_risk"},
+        {"feature": "ACK Flag Count",              "impact": 0.15, "direction": "increases_risk"},
     ],
     "data_exfiltration": [
-        {"feature": "Total Length of Fwd Packets", "impact": 0.50, "direction": "increases_risk"},
-        {"feature": "Total Length of Bwd Packets", "impact": 0.25, "direction": "decreases_risk"},
-        {"feature": "Flow Duration",               "impact": 0.15, "direction": "increases_risk"},
-        {"feature": "Flow Bytes/s",                "impact": 0.10, "direction": "increases_risk"},
+        {"feature": "Total Length of Fwd Packets", "impact": 0.45, "direction": "increases_risk"},
+        {"feature": "Down/Up Ratio",               "impact": 0.25, "direction": "decreases_risk"},
+        {"feature": "Total Length of Bwd Packets", "impact": 0.20, "direction": "decreases_risk"},
+        {"feature": "Avg Fwd Segment Size",        "impact": 0.10, "direction": "increases_risk"},
     ],
     "c2_beacon": [
-        {"feature": "Flow IAT Mean",               "impact": 0.40, "direction": "increases_risk"},
-        {"feature": "Total Length of Fwd Packets", "impact": 0.25, "direction": "decreases_risk"},
-        {"feature": "Flow Duration",               "impact": 0.20, "direction": "decreases_risk"},
+        {"feature": "Total Length of Fwd Packets", "impact": 0.35, "direction": "decreases_risk"},
+        {"feature": "Average Packet Size",         "impact": 0.25, "direction": "decreases_risk"},
+        {"feature": "Down/Up Ratio",               "impact": 0.25, "direction": "increases_risk"},
         {"feature": "Destination Port",            "impact": 0.15, "direction": "increases_risk"},
     ],
 }
@@ -79,13 +81,16 @@ _RULE_EVIDENCE: Dict[str, list] = {
 # echo).  We don't fire the c2_beacon rule on these — too many false positives.
 BEACON_IGNORE_PORTS = {53, 67, 68, 123, 137, 138, 5353, 5355, 1900}
 
-# Feature indices (must match FEATURE_NAMES order in feature_config.py).
-_F_DST_PORT  = 0
-_F_DURATION  = 1   # microseconds
-_F_FWD_PKTS  = 2
-_F_BWD_PKTS  = 3
-_F_FWD_BYTES = 4
-_F_BWD_BYTES = 5
+# Feature indices — must match the 34-feature FEATURE_NAMES order in
+# feature_config.py.  There is NO duration / rate feature in this layout
+# (they were dropped for CICFlowMeter/nfstream compatibility), so the
+# signature rules use byte volumes, packet counts, and wall-clock timing
+# tracked across calls instead.
+_F_DST_PORT  = 0   # Destination Port
+_F_FWD_PKTS  = 1   # Total Fwd Packets
+_F_BWD_PKTS  = 2   # Total Backward Packets
+_F_FWD_BYTES = 3   # Total Length of Fwd Packets
+_F_BWD_BYTES = 4   # Total Length of Bwd Packets
 
 
 class SignatureEngine:
@@ -104,7 +109,6 @@ class SignatureEngine:
     BRUTEFORCE_FLOWS_TO_SVC = 8     # repeated hits on (dst, auth_port)
 
     EXFIL_SINGLE_FWD_BYTES  = 1_000_000   # 1 MB in one flow
-    EXFIL_SINGLE_DURATION_S = 3.0
     EXFIL_SINGLE_RATIO      = 3.0          # fwd_bytes / bwd_bytes
     EXFIL_CUMUL_FWD_BYTES   = 10_000_000   # 10 MB total over 60s
     EXFIL_CUMUL_RATIO       = 3.0          # outbound much greater than inbound
@@ -139,7 +143,6 @@ class SignatureEngine:
             return None
 
         dst_port    = int(features[_F_DST_PORT])
-        duration_us = float(features[_F_DURATION])
         fwd_bytes   = float(features[_F_FWD_BYTES])
         bwd_bytes   = float(features[_F_BWD_BYTES])
         total_bytes = fwd_bytes + bwd_bytes
@@ -197,18 +200,18 @@ class SignatureEngine:
                 )
 
         # ── Rule 4: Data exfiltration ─────────────────────────────────
-        # (a) Single big asymmetric flow.
+        # (a) Single big asymmetric flow.  nfstream's 60s active_timeout
+        # means one flow can already aggregate a large transfer, so byte
+        # volume + outbound asymmetry is sufficient without a duration field.
         if (
             fwd_bytes >= self.EXFIL_SINGLE_FWD_BYTES
-            and duration_us / 1_000_000 >= self.EXFIL_SINGLE_DURATION_S
             and fwd_bytes >= self.EXFIL_SINGLE_RATIO * max(bwd_bytes, 1.0)
         ):
             mb = fwd_bytes / 1_000_000
             return self._match(
                 "data_exfiltration",
                 f"{src} -> {dst}: {mb:.1f} MB outbound in single flow "
-                f"({duration_us/1_000_000:.1f}s, fwd/bwd ratio "
-                f"{fwd_bytes / max(bwd_bytes, 1.0):.0f}x)",
+                f"(fwd/bwd ratio {fwd_bytes / max(bwd_bytes, 1.0):.0f}x)",
             )
         # (b) Cumulative outbound burst across many flows.
         exfil_buf = self._exfil[exfil_key]

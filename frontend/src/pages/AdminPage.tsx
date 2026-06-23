@@ -3,7 +3,7 @@ import {
   CheckCircle, Clock, Database, FileUp,
   RefreshCw, Settings2, Shield, Trash2, UserPlus, Users, XCircle,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   ApiError, deleteUser, getHealth, getThresholds,
   getPcapJob, listUsers, previewCleanup, registerUser, runCleanup, runCleanupAll,
@@ -432,8 +432,8 @@ function UserManagementCard() {
                 </tr>
               )}
               {users.map((u) => (
-                <>
-                  <tr key={u.id} className="hover:bg-slate-800/30 transition-colors">
+                <Fragment key={u.id}>
+                  <tr className="hover:bg-slate-800/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-slate-500">{u.id}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -544,7 +544,7 @@ function UserManagementCard() {
                   </tr>
                   {/* Delete confirmation row */}
                   {deleteConfirm === u.id && (
-                    <tr key={`${u.id}-confirm`} className="bg-red-950/30">
+                    <tr className="bg-red-950/30">
                       <td colSpan={6} className="px-4 py-3">
                         <div className="flex items-center gap-3 text-sm">
                           <XCircle className="h-4 w-4 shrink-0 text-red-400" />
@@ -568,7 +568,7 @@ function UserManagementCard() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -804,6 +804,7 @@ function ThresholdsCard() {
   const [local, setLocal] = useState<Partial<Thresholds>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (thresholds) setLocal(thresholds);
@@ -814,17 +815,20 @@ function ThresholdsCard() {
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
+    setError('');
     try {
       await setThresholds(local);
       queryClient.invalidateQueries({ queryKey: ['thresholds'] });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save preferences');
     } finally {
       setSaving(false);
     }
   };
 
-  const notifSevs: string[] = effective.alert_notification_severities ?? ['critical', 'high'];
+  const notifSevs: string[] = effective.alert_notification_severities ?? ['critical', 'high', 'medium'];
 
   const toggleSev = (sev: string) => {
     const next = notifSevs.includes(sev)
@@ -880,6 +884,13 @@ function ThresholdsCard() {
             ))}
           </div>
         </div>
+
+        {error && (
+          <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            <XCircle className="h-4 w-4 shrink-0" />
+            {error}
+          </div>
+        )}
 
         <button
           onClick={handleSave}

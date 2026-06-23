@@ -433,43 +433,50 @@ def _process_pcap_background(
         from src.detection.collector import TrafficCollector
         from src.detection.engine import InferenceEngine
         from src.detection.classifier import classify_attack_type
-        from src.api.schemas import AlertPayload as _AlertPayload, ShapInsight as _ShapInsight
+        from src.detection.signatures import SignatureEngine
+        from src.core.severity import classify_alert
+        from src.api.schemas import AlertPayload as _AlertPayload
 
         engine = InferenceEngine(
             model_path=str(_PROJECT_ROOT / "model" / "vulnsight_cnn_bilstm.pth"),
             scaler_path=str(_PROJECT_ROOT / "model" / "scaler.pkl"),
             use_shap=False,
         )
+        signatures = SignatureEngine()
         collector = TrafficCollector(use_pcap=filepath)
 
         processed = 0
         alerts_saved = 0
-        dedup_window = int(repository_ref.get_setting("dedup_window_seconds") or 60)
-
-        # Reuse the same threshold-aware buckets as src/api/client.py so PCAP
-        # upload alerts look identical to live-detection alerts.
-        from src.api.client import TRAINED_THRESHOLD
-        _midpoint = (TRAINED_THRESHOLD + 1.0) / 2.0
-
-        def _cls(p, c):
-            if p == 1:
-                if c >= 0.95:        return "very_high", "critical", "isolate_host_immediately"
-                if c >= _midpoint:   return "high",      "high",     "block_and_investigate"
-                if c >= TRAINED_THRESHOLD:
-                                     return "medium",    "medium",   "monitor_closely"
-                return "low", "low", "log_and_review"
-            return "very_high", "info", "no_action_required"
 
         for features, metadata in collector.get_flows():
-            # Engine applies the tuned threshold (0.78) internally — do not re-threshold here.
-            prediction, confidence = engine.process_flow(features)
-            if prediction is None:
-                continue
+            # ── First pass: signature engine ────────────────────────────
+            # Same deterministic rules live detection runs (port scan, DDoS,
+            # brute force, exfil, C2 beacon) — without this, PCAP analysis
+            # relied solely on the ML model's 0.76+ threshold and silently
+            # missed rate/pattern-based attacks the model wasn't trained to
+            # flag from flow statistics alone.
+            sig_match = signatures.check(features, metadata)
+            if sig_match is not None:
+                prediction  = 1
+                confidence  = sig_match["confidence"]
+                attack_type = sig_match["attack_type"]
+            else:
+                # Pass metadata so the engine uses per-conversation sliding
+                # windows. Without this every PCAP flow would share one
+                # global buffer, mixing unrelated connections and breaking
+                # model accuracy.
+                prediction, confidence = engine.process_flow(features, meta=metadata)
+                if prediction is None:
+                    continue
+                attack_type = classify_attack_type(features, prediction == 1)
             processed += 1
 
-            attack_type = classify_attack_type(features, prediction == 1)
+            # Skip benign flows — only malicious hits are relevant for PCAP analysis.
+            if prediction != 1:
+                continue
 
-            lvl, sev, action = _cls(prediction, confidence)
+            cls = classify_alert(1, confidence, attack_type)
+
             alert = _AlertPayload(
                 timestamp=datetime.now(timezone.utc),
                 source_ip=metadata.get("src_ip", "0.0.0.0"),
@@ -477,20 +484,24 @@ def _process_pcap_background(
                 protocol=metadata.get("protocol"),
                 dst_port=int(features[0]) if features and len(features) > 0 else None,
                 interface=f"pcap_upload:{Path(filepath).name}",
-                prediction=prediction,
-                label="ATTACK DETECTED" if prediction == 1 else "NORMAL",
+                prediction=1,
+                label="ATTACK DETECTED",
                 confidence=float(confidence),
-                confidence_level=lvl,
-                severity=sev,
-                triage_action=action,
-                is_malicious=prediction == 1,
+                confidence_level=cls["confidence_level"],
+                severity=cls["severity"],
+                triage_action=cls["triage_action"],
+                is_malicious=True,
                 attack_type=attack_type,
             )
-            is_new = repository_ref.save_alert_with_dedup(alert, window_seconds=dedup_window)
-            if is_new:
-                alerts_saved += 1
-                payload = alert.model_dump(mode="json")
-                asyncio.run_coroutine_threadsafe(ws_manager_ref.broadcast_json(payload), loop)
+
+            # Do NOT use dedup for PCAP uploads — the whole file is replayed in
+            # seconds, so every alert lands within the 60-second dedup window.
+            # That would suppress all-but-the-first notification per IP pair,
+            # making the upload appear silent even for a fully malicious PCAP.
+            repository_ref.save_alert(alert)
+            alerts_saved += 1
+            payload = alert.model_dump(mode="json")
+            asyncio.run_coroutine_threadsafe(ws_manager_ref.broadcast_json(payload), loop)
 
         _pcap_jobs[job_id].update(
             status="done",

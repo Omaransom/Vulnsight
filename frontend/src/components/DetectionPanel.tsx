@@ -22,6 +22,7 @@ export function DetectionPanel() {
   const queryClient = useQueryClient();
   const [selectedDevice, setSelectedDevice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: status } = useQuery<DetectionStatus>({
     queryKey: ['detection-status'],
@@ -48,9 +49,12 @@ export function DetectionPanel() {
 
   async function handleStart() {
     setBusy(true);
+    setActionError(null);
     try {
       const next = await startDetection(selectedDevice || undefined);
       queryClient.setQueryData(['detection-status'], next);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to start detection');
     } finally {
       setBusy(false);
     }
@@ -58,9 +62,12 @@ export function DetectionPanel() {
 
   async function handleStop() {
     setBusy(true);
+    setActionError(null);
     try {
       const next = await stopDetection();
       queryClient.setQueryData(['detection-status'], next);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to stop detection');
     } finally {
       setBusy(false);
     }
@@ -89,11 +96,11 @@ export function DetectionPanel() {
         </span>
       </div>
 
-      {/* Error banner */}
-      {status?.error && (
+      {/* Error banner — request failure (actionError) or backend engine error */}
+      {(actionError || status?.error) && (
         <div className="flex items-start gap-2 rounded-lg border border-red-800/60 bg-red-950/40 px-3 py-2 text-xs text-red-400">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{status.error}</span>
+          <span>{actionError ?? status?.error}</span>
         </div>
       )}
 

@@ -340,11 +340,17 @@ export function ReportsPage() {
     value: a.event_count,
   }));
 
+  // Threat score 0–100: base from malicious ratio (0–50), +25 if any critical
+  // alerts present, +15 if more than 10 high-severity alerts.
+  // NOTE: each ternary MUST be parenthesised — without the parens, JS operator
+  // precedence makes `+` bind before `?:`, collapsing the whole expression to 25.
+  const criticalCount = severityData.find((s) => s.name === 'critical')?.value ?? 0;
+  const highCount = severityData.find((s) => s.name === 'high')?.value ?? 0;
   const threatScore = report
     ? Math.min(100, Math.round(
-        (report.malicious_ratio * 50) +
-        (severityData.find((s) => s.name === 'critical')?.value ?? 0) > 0 ? 25 : 0 +
-        (severityData.find((s) => s.name === 'high')?.value ?? 0) > 10 ? 15 : 0,
+        report.malicious_ratio * 50
+        + (criticalCount > 0 ? 25 : 0)
+        + (highCount > 10 ? 15 : 0),
       ))
     : null;
 

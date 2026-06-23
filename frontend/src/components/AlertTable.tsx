@@ -99,7 +99,7 @@ export function AlertTable({ alerts, compact = false }: Props) {
               )}
               {sorted.map((alert, i) => (
                 <tr
-                  key={i}
+                  key={`${alert.timestamp}|${alert.source_ip}|${alert.destination_ip}|${i}`}
                   onClick={() => setSelected(alert)}
                   className="cursor-pointer transition-colors hover:bg-slate-800/40"
                 >

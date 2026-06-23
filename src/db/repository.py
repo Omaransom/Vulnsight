@@ -235,8 +235,9 @@ class AlertRepository:
                     cursor = conn.execute(
                         """
                         INSERT INTO alerts (
-                            timestamp, source_ip, destination_ip, severity, is_malicious, payload_json
-                        ) VALUES (?, ?, ?, ?, ?, ?)
+                            timestamp, source_ip, destination_ip, severity,
+                            is_malicious, payload_json, attack_type
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             payload["timestamp"],
@@ -245,6 +246,7 @@ class AlertRepository:
                             payload["severity"],
                             1 if payload["is_malicious"] else 0,
                             json.dumps(payload),
+                            payload["attack_type"],
                         ),
                     )
                     conn.execute(
@@ -478,7 +480,10 @@ class AlertRepository:
     _DEFAULT_SETTINGS: Dict[str, Any] = {
         "malicious_confidence_min": 0.5,
         "dedup_window_seconds": 60,
-        "alert_notification_severities": ["critical", "high"],
+        # Notify on every malicious severity by default — recon (port_scan,
+        # medium) should still surface a toast, not just active attacks.
+        # Live broadcast dedup keeps this from spamming during bursts.
+        "alert_notification_severities": ["critical", "high", "medium"],
         "max_alerts_per_page": 200,
     }
 
